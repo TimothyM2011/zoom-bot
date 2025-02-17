@@ -6,11 +6,12 @@ app = Flask(__name__)
 def home():
     return "Zoom Bot is Running!"
 
+# Ensure this route accepts POST requests
 @app.route("/zoom_webhook", methods=["POST"])
 def zoom_webhook():
     data = request.json
 
-    # Zoom validation request
+    # Check if it's a URL validation request
     if data and "event" in data and data["event"] == "endpoint.url_validation":
         return jsonify({
             "plainToken": data["payload"]["plainToken"]
@@ -21,3 +22,4 @@ def zoom_webhook():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)  # Match Render's port
+
