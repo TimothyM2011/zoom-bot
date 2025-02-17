@@ -9,6 +9,13 @@ def home():
 @app.route("/zoom_webhook", methods=["POST"])
 def zoom_webhook():
     data = request.json
+    
+    # Zoom's validation check
+    if "event" in data and data["event"] == "endpoint.url_validation":
+        return jsonify({
+            "plainToken": data["payload"]["plainToken"]
+        }), 200
+
     print("Received Event:", data)
     return jsonify({"message": "Received"}), 200
 
