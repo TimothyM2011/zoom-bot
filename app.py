@@ -9,9 +9,9 @@ def home():
 @app.route("/zoom_webhook", methods=["POST"])
 def zoom_webhook():
     data = request.json
-    
-    # Zoom's validation check
-    if "event" in data and data["event"] == "endpoint.url_validation":
+
+    # Zoom validation request
+    if data and "event" in data and data["event"] == "endpoint.url_validation":
         return jsonify({
             "plainToken": data["payload"]["plainToken"]
         }), 200
@@ -20,4 +20,4 @@ def zoom_webhook():
     return jsonify({"message": "Received"}), 200
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=10000)  # Match Render's port
