@@ -1,25 +1,34 @@
+import hmac
+import hashlib
+import json
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-@app.route("/", methods=["GET"])
-def home():
-    return "Zoom Bot is Running!"
+# Replace with your secret token (Zoom generates this)
+WEBHOOK_SECRET_TOKEN = 'S-ifzDhFRtetG9iKj43ZDg'
 
-# Ensure this route accepts POST requests
 @app.route("/zoom_webhook", methods=["POST"])
 def zoom_webhook():
     data = request.json
 
-    # Check if it's a URL validation request
-    if data and "event" in data and data["event"] == "endpoint.url_validation":
+    # Handle the CRC challenge
+    if data["event"] == "endpoint.url_validation":
+        plain_token = data["payload"]["plainToken"]
+        encrypted_token = hmac.new(
+            WEBHOOK_SECRET_TOKEN.encode('utf-8'),
+            plain_token.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+
         return jsonify({
-            "plainToken": data["payload"]["plainToken"]
+            "plainToken": plain_token,
+            "encryptedToken": encrypted_token
         }), 200
 
+    # Handle other events (process the payload)
     print("Received Event:", data)
     return jsonify({"message": "Received"}), 200
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)  # Match Render's port
-
+    app.run(host="0.0.0.0", port=10000)
