@@ -7,7 +7,7 @@ def home():
     return "Zoom Bot is Running!"
 
 # Ensure this route accepts POST requests
-@app.route("/zoom_webhook", methods=["POST"])
+@app.route("/zoom_webhook", methods=["GET"])
 def zoom_webhook():
     data = request.json
 
