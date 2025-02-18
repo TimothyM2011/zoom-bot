@@ -9,7 +9,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 app = Flask(__name__)
 
 # Replace with your secret token (Zoom generates this)
-WEBHOOK_SECRET_TOKEN = 'OFjuyO_6StaNC6oc0xvpWA'
+WEBHOOK_SECRET_TOKEN = 'your_zoom_webhook_secret_token'
 
 # Setup logging
 logging.basicConfig(level=logging.DEBUG)
@@ -55,39 +55,37 @@ def log_violation_to_sheets(user_id, violation_type, warning_count):
         body=body
     ).execute()
 
-def validate_signature(request):
-    # Retrieve the request body and headers
-    request_body = request.get_data(as_text=True)
-    zoom_signature = request.headers.get('x-zm-signature')
-    zoom_time = request.headers.get('x-zm-timestamp')
-
-    # Create a signature string using the secret token and the body of the request
-    message = zoom_time + request_body
-    computed_signature = hmac.new(
-        WEBHOOK_SECRET_TOKEN.encode('utf-8'),
-        message.encode('utf-8'),
-        hashlib.sha256
-    ).hexdigest()
-
-    # Compare the computed signature with the signature sent by Zoom
-    return hmac.compare_digest(computed_signature, zoom_signature)
-
-@app.route('/zoom-webhook', methods=['POST'])
-def zoom_webhook():
-    # Validate the webhook signature before processing any data
-    if data["event"] == "endpoint.url_validation":
-        plain_token = data["payload"]["plainToken"]
+def validate_crc(request):
+    # Get the incoming CRC challenge and plainToken
+    data = request.json
+    if 'event' not in data:
+        return False
+    
+    if data['event'] == 'endpoint.url_validation':
+        plain_token = data['payload']['plainToken']
         encrypted_token = hmac.new(
             WEBHOOK_SECRET_TOKEN.encode('utf-8'),
             plain_token.encode('utf-8'),
             hashlib.sha256
         ).hexdigest()
 
+        # Return the response with the plainToken and encryptedToken
         return jsonify({
             "plainToken": plain_token,
             "encryptedToken": encrypted_token
         }), 200
 
+    # If no CRC challenge, proceed with the normal handling
+    return None
+
+@app.route('/zoom-webhook', methods=['POST'])
+def zoom_webhook():
+    # First, check if it's a CRC challenge
+    crc_response = validate_crc(request)
+    if crc_response:
+        return crc_response  # Return the CRC challenge response
+    
+    # Process the actual event (not CRC)
     data = request.json
     logging.info(f"Received data: {data}")
 
@@ -144,3 +142,4 @@ def send_admin_notification(user_id, violation_type, warning_count):
 
 if __name__ == '__main__':
     app.run(port=5000)
+
