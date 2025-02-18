@@ -5,11 +5,12 @@ import sqlite3
 from flask import Flask, request, jsonify
 from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
+import re
 
 app = Flask(__name__)
 
 # Replace with your secret token (Zoom generates this)
-WEBHOOK_SECRET_TOKEN = 'OFjuyO_6StaNC6oc0xvpWA'
+WEBHOOK_SECRET_TOKEN = 'your_zoom_webhook_secret_token'
 
 # Setup logging
 logging.basicConfig(level=logging.DEBUG)
@@ -29,9 +30,8 @@ CREATE TABLE IF NOT EXISTS violations (
 conn.commit()
 
 # Example of Google Sheets Integration (or you can use another method like email notifications)
-# Assuming you have set up Google Sheets API credentials
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
-SPREADSHEET_ID = '10kU-K2MejZMzsUPjAX-ZN4aN4SoO9fjcuMXaQYz0b2g'
+SPREADSHEET_ID = 'your_google_sheet_id'
 RANGE_NAME = 'Sheet1!A1:D1'
 
 # OAuth flow for Google Sheets
@@ -97,15 +97,11 @@ def zoom_webhook():
     # Example: Check for message events and ban violations
     if event == "chat.message.sent":
         message = data.get("payload", {}).get("object", {}).get("message")
-        if "call" in message or "zoom.us/j/" in message:  # Detect call-related terms
-            violation_type = "No Calling"
-            warning_count = process_violation(user_id, violation_type)
+        violation_type, warning_count = evaluate_message(message, user_id)
 
     elif event == "chat.message.updated":
         message = data.get("payload", {}).get("object", {}).get("message")
-        if "call" in message or "zoom.us/j/" in message:  # Detect call-related terms
-            violation_type = "No Calling"
-            warning_count = process_violation(user_id, violation_type)
+        violation_type, warning_count = evaluate_message(message, user_id)
 
     if violation_type:
         log_violation_to_sheets(user_id, violation_type, warning_count)
@@ -114,6 +110,29 @@ def zoom_webhook():
         send_admin_notification(user_id, violation_type, warning_count)
 
     return jsonify({"status": "success"}), 200
+
+def evaluate_message(message, user_id):
+    violation_type = None
+    warning_count = None
+
+    # Check for rule violations
+    if re.search(r"(call|zoom\.us\/j\/)", message, re.IGNORECASE):
+        violation_type = "No Calling"
+        warning_count = process_violation(user_id, violation_type)
+
+    elif re.search(r"(promotion|buy|discount|sale)", message, re.IGNORECASE):
+        violation_type = "No Promotions"
+        warning_count = process_violation(user_id, violation_type)
+
+    elif re.search(r"(nsfw|adult|explicit|porn|xxx)", message, re.IGNORECASE):
+        violation_type = "No NSFW"
+        warning_count = process_violation(user_id, violation_type)
+
+    elif re.search(r"(leak|private info|confidential)", message, re.IGNORECASE):
+        violation_type = "Leaking Information"
+        warning_count = process_violation(user_id, violation_type)
+
+    return violation_type, warning_count
 
 def process_violation(user_id, violation_type):
     # Check if user already has violations
@@ -142,4 +161,3 @@ def send_admin_notification(user_id, violation_type, warning_count):
 
 if __name__ == '__main__':
     app.run(port=5000)
-
