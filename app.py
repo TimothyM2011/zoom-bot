@@ -75,8 +75,18 @@ def validate_signature(request):
 @app.route('/zoom-webhook', methods=['POST'])
 def zoom_webhook():
     # Validate the webhook signature before processing any data
-    if not validate_signature(request):
-        return jsonify({"message": "Invalid signature"}), 403
+    if data["event"] == "endpoint.url_validation":
+        plain_token = data["payload"]["plainToken"]
+        encrypted_token = hmac.new(
+            WEBHOOK_SECRET_TOKEN.encode('utf-8'),
+            plain_token.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+
+        return jsonify({
+            "plainToken": plain_token,
+            "encryptedToken": encrypted_token
+        }), 200
 
     data = request.json
     logging.info(f"Received data: {data}")
