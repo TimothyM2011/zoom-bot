@@ -1,11 +1,15 @@
-from flask import Flask, request, jsonify
+import hmac
+import hashlib
 import logging
-import os
+import sqlite3
+from flask import Flask, request, jsonify
 from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
-import sqlite3
 
 app = Flask(__name__)
+
+# Replace with your secret token (Zoom generates this)
+WEBHOOK_SECRET_TOKEN = 'your_zoom_webhook_secret_token'
 
 # Setup logging
 logging.basicConfig(level=logging.DEBUG)
@@ -51,8 +55,29 @@ def log_violation_to_sheets(user_id, violation_type, warning_count):
         body=body
     ).execute()
 
+def validate_signature(request):
+    # Retrieve the request body and headers
+    request_body = request.get_data(as_text=True)
+    zoom_signature = request.headers.get('x-zm-signature')
+    zoom_time = request.headers.get('x-zm-timestamp')
+
+    # Create a signature string using the secret token and the body of the request
+    message = zoom_time + request_body
+    computed_signature = hmac.new(
+        WEBHOOK_SECRET_TOKEN.encode('utf-8'),
+        message.encode('utf-8'),
+        hashlib.sha256
+    ).hexdigest()
+
+    # Compare the computed signature with the signature sent by Zoom
+    return hmac.compare_digest(computed_signature, zoom_signature)
+
 @app.route('/zoom-webhook', methods=['POST'])
 def zoom_webhook():
+    # Validate the webhook signature before processing any data
+    if not validate_signature(request):
+        return jsonify({"message": "Invalid signature"}), 403
+
     data = request.json
     logging.info(f"Received data: {data}")
 
