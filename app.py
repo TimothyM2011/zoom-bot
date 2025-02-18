@@ -9,7 +9,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 app = Flask(__name__)
 
 # Replace with your secret token (Zoom generates this)
-WEBHOOK_SECRET_TOKEN = 'your_zoom_webhook_secret_token'
+WEBHOOK_SECRET_TOKEN = 'OFjuyO_6StaNC6oc0xvpWA'
 
 # Setup logging
 logging.basicConfig(level=logging.DEBUG)
