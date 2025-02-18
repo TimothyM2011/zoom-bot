@@ -27,7 +27,7 @@ conn.commit()
 # Example of Google Sheets Integration (or you can use another method like email notifications)
 # Assuming you have set up Google Sheets API credentials
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
-SPREADSHEET_ID = 'your-google-sheet-id'
+SPREADSHEET_ID = '10kU-K2MejZMzsUPjAX-ZN4aN4SoO9fjcuMXaQYz0b2g'
 RANGE_NAME = 'Sheet1!A1:D1'
 
 # OAuth flow for Google Sheets
