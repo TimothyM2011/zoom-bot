@@ -1,6 +1,6 @@
-Flask
-requests
-python-dotenv
-google-api-python-client
-google-auth-oauthlib
-gunicorn
+Flask==3.1.0
+requests==2.32.3
+python-dotenv==1.0.1
+google-api-python-client==2.161.0
+google-auth-oauthlib==1.2.1
+gunicorn==23.0.0
