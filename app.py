@@ -13,11 +13,11 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 app = Flask(__name__)
 
 # ✅ Load sensitive information from environment variables
-WEBHOOK_SECRET_TOKEN = os.getenv("WEBHOOK_SECRET_TOKEN", "your_zoom_webhook_secret")
-ZOOM_CLIENT_ID = os.getenv("ZOOM_CLIENT_ID", "your_zoom_client_id")
-ZOOM_CLIENT_SECRET = os.getenv("ZOOM_CLIENT_SECRET", "your_zoom_client_secret")
-ZOOM_REDIRECT_URI = os.getenv("ZOOM_REDIRECT_URI", "http://localhost:5000/oauth/callback")
-SPREADSHEET_ID = os.getenv("SPREADSHEET_ID", "your_google_sheet_id")
+WEBHOOK_SECRET_TOKEN = ("bJxRTcEpQWODaoRFfQ-6DQ")
+ZOOM_CLIENT_ID = ("62I52TceR228cm0hZmGBFQ")
+ZOOM_CLIENT_SECRET = ("Cc4s6O2B8d280FDy25K2181OxVEiZvPH")
+ZOOM_REDIRECT_URI = ("https://zoom-bot.com/oauth/callback")
+SPREADSHEET_ID = ("10kU-K2MejZMzsUPjAX-ZN4aN4SoO9fjcuMXaQYz0b2g")
 
 # ✅ Setup logging
 logging.basicConfig(level=logging.DEBUG)
@@ -191,5 +191,5 @@ def oauth_callback():
         return jsonify({"error": "OAuth token exchange failed"}), 400
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
+    port = int(10000)
     app.run(host="0.0.0.0", port=port)
