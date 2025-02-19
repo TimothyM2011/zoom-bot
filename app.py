@@ -3,12 +3,15 @@ import hashlib
 import logging
 import sqlite3
 import urllib.parse
+from flask import Flask, request
 import requests
 import os
 from dotenv import load_dotenv  # Import dotenv
 from flask import Flask, request, jsonify, redirect
 from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
+
+app = Flask(__name__)
 
 # ✅ Load environment variables from the .env file
 load_dotenv()
