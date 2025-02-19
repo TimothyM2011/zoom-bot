@@ -3,32 +3,37 @@ import hashlib
 import logging
 import sqlite3
 import urllib.parse
-from flask import Flask, request
 import requests
 import os
-from dotenv import load_dotenv  # Import dotenv
+import re
+from dotenv import load_dotenv
 from flask import Flask, request, jsonify, redirect
-from googleapiclient.discovery import build
-from google_auth_oauthlib.flow import InstalledAppFlow
 
-app = Flask(__name__)
-
-# ✅ Load environment variables from the .env file
+# ✅ Load environment variables
 load_dotenv()
 
-# ✅ Load sensitive information from environment variables
+# ✅ Load sensitive info
 WEBHOOK_SECRET_TOKEN = os.getenv("WEBHOOK_SECRET_TOKEN")
 ZOOM_CLIENT_ID = os.getenv("ZOOM_CLIENT_ID")
 ZOOM_CLIENT_SECRET = os.getenv("ZOOM_CLIENT_SECRET")
 ZOOM_REDIRECT_URI = os.getenv("ZOOM_REDIRECT_URI")
 SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
+ZOOM_BOT_TOKEN = os.getenv("ZOOM_BOT_TOKEN")
+ZOOM_ADMIN_CHAT_ID = os.getenv("ZOOM_ADMIN_CHAT_ID")
 
-# ✅ Setup logging
-logging.basicConfig(level=logging.DEBUG)
+app = Flask(__name__)
 
-# ✅ Database setup
-conn = sqlite3.connect('violations.db', check_same_thread=False)
+# ✅ Database setup (Stores OAuth tokens & violations)
+conn = sqlite3.connect('bot_data.db', check_same_thread=False)
 cursor = conn.cursor()
+
+cursor.execute(''' 
+CREATE TABLE IF NOT EXISTS tokens (
+    access_token TEXT,
+    refresh_token TEXT,
+    expires_at INTEGER
+)
+''')
 
 cursor.execute(''' 
 CREATE TABLE IF NOT EXISTS violations (
@@ -39,31 +44,75 @@ CREATE TABLE IF NOT EXISTS violations (
 ''')
 conn.commit()
 
-# ✅ Google Sheets Integration
-SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
-RANGE_NAME = 'Sheet1!A1:D1'
+# ✅ OAuth Authorization Route
+@app.route('/authorize')
+def authorize():
+    auth_url = (
+        f"https://zoom.us/oauth/authorize"
+        f"?response_type=code"
+        f"&client_id={ZOOM_CLIENT_ID}"
+        f"&redirect_uri={urllib.parse.quote(ZOOM_REDIRECT_URI)}"
+    )
+    return redirect(auth_url)
 
-def get_sheets_service():
-    flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
-    creds = flow.run_local_server(port=0)
-    service = build('sheets', 'v4', credentials=creds)
-    return service
+# ✅ OAuth Callback Route (Exchanges code for token)
+@app.route('/oauth/callback')
+def oauth_callback():
+    code = request.args.get('code')
+    token_url = "https://zoom.us/oauth/token"
+    payload = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": ZOOM_REDIRECT_URI
+    }
+    auth = (ZOOM_CLIENT_ID, ZOOM_CLIENT_SECRET)
 
-def log_violation_to_sheets(user_id, violation_type, warning_count):
-    try:
-        service = get_sheets_service()
-        values = [[user_id, violation_type, warning_count]]
-        body = {'values': values}
-        service.spreadsheets().values().append(
-            spreadsheetId=SPREADSHEET_ID,
-            range=RANGE_NAME,
-            valueInputOption="RAW",
-            body=body
-        ).execute()
-    except Exception as e:
-        logging.error(f"Failed to log to Google Sheets: {e}")
+    response = requests.post(token_url, data=payload, auth=auth)
 
-# ✅ Validate Zoom webhook CRC
+    if response.status_code == 200:
+        tokens = response.json()
+        store_tokens(tokens["access_token"], tokens["refresh_token"])
+        return "Authorization successful! Bot is now active."
+    return jsonify({"error": "OAuth token exchange failed"}), 400
+
+# ✅ Store Tokens in Database
+def store_tokens(access_token, refresh_token):
+    cursor.execute("DELETE FROM tokens")
+    cursor.execute("INSERT INTO tokens (access_token, refresh_token, expires_at) VALUES (?, ?, strftime('%s', 'now') + 3600)", 
+                   (access_token, refresh_token))
+    conn.commit()
+
+# ✅ Get Stored Token
+def get_access_token():
+    cursor.execute("SELECT access_token, refresh_token, expires_at FROM tokens")
+    row = cursor.fetchone()
+
+    if not row:
+        return None
+
+    access_token, refresh_token, expires_at = row
+    if int(expires_at) < int(os.popen('date +%s').read().strip()):  # Token expired
+        return refresh_access_token(refresh_token)
+    return access_token
+
+# ✅ Refresh Access Token
+def refresh_access_token(refresh_token):
+    token_url = "https://zoom.us/oauth/token"
+    payload = {
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token
+    }
+    auth = (ZOOM_CLIENT_ID, ZOOM_CLIENT_SECRET)
+
+    response = requests.post(token_url, data=payload, auth=auth)
+
+    if response.status_code == 200:
+        new_tokens = response.json()
+        store_tokens(new_tokens["access_token"], new_tokens["refresh_token"])
+        return new_tokens["access_token"]
+    return None
+
+# ✅ Validate Webhook Signature
 def validate_crc(request):
     data = request.json
     if 'event' not in data:
@@ -79,6 +128,7 @@ def validate_crc(request):
         return jsonify({"plainToken": plain_token, "encryptedToken": encrypted_token}), 200
     return None
 
+# ✅ Handle Webhooks
 @app.route('/zoom-webhook', methods=['POST'])
 def zoom_webhook():
     crc_response = validate_crc(request)
@@ -90,35 +140,25 @@ def zoom_webhook():
 
     event = data.get("event")
     user_id = data.get("payload", {}).get("object", {}).get("user_id")
-    violation_type, warning_count = None, None
+    message = data.get("payload", {}).get("object", {}).get("message")
 
-    if event in ["chat.message.sent", "chat.message.updated"]:
-        message = data.get("payload", {}).get("object", {}).get("message")
-        violation_type, warning_count = evaluate_message(message, user_id)
+    # ✅ Send message to Zapier to check for violations
+    violation_type = check_message_with_zapier(message)
 
     if violation_type:
+        warning_count = process_violation(user_id, violation_type)
         log_violation_to_sheets(user_id, violation_type, warning_count)
         send_admin_notification(user_id, violation_type, warning_count)
 
     return jsonify({"status": "success"}), 200
 
-def evaluate_message(message, user_id):
-    violation_type, warning_count = None, None
+# ✅ Send message to Zapier
+def check_message_with_zapier(message):
+    zapier_url = "https://interfaces.zapier.com/assets/web-components/zapier-interfaces/zapier-interfaces.esm.js"
+    response = requests.post(zapier_url, json={"message": message})
+    return response.json().get("violation")
 
-    if re.search(r"(call|zoom\.us\/j\/)", message, re.IGNORECASE):
-        violation_type = "No Calling"
-    elif re.search(r"(promotion|buy|discount|sale)", message, re.IGNORECASE):
-        violation_type = "No Promotions"
-    elif re.search(r"(nsfw|adult|explicit|porn|xxx)", message, re.IGNORECASE):
-        violation_type = "No NSFW"
-    elif re.search(r"(leak|private info|confidential)", message, re.IGNORECASE):
-        violation_type = "Leaking Information"
-
-    if violation_type:
-        warning_count = process_violation(user_id, violation_type)
-
-    return violation_type, warning_count
-
+# ✅ Process violation
 def process_violation(user_id, violation_type):
     cursor.execute("SELECT warning_count FROM violations WHERE user_id = ?", (user_id,))
     row = cursor.fetchone()
@@ -133,67 +173,30 @@ def process_violation(user_id, violation_type):
     conn.commit()
     return warning_count
 
+# ✅ Notify Admin Group
 def send_admin_notification(user_id, violation_type, warning_count):
-    logging.info(f"Admin notified: User {user_id} violated rule '{violation_type}'. Warning count: {warning_count}")
-    send_message_to_chat(f"User {user_id} violated rule: {violation_type}. Warning count: {warning_count}", user_id)
+    message = f"User {user_id} violated rule: {violation_type}. Warning count: {warning_count}"
+    send_message_to_chat(message, ZOOM_ADMIN_CHAT_ID)
 
-def send_message_to_chat(message, user_id):
-    bot_token = os.getenv("ZOOM_BOT_TOKEN")
-    chat_id = os.getenv("ZOOM_ADMIN_CHAT_ID")
-
-    url = f"https://api.zoom.us/v2/chat/users/{bot_token}/messages"
+# ✅ Send Message to Zoom Chat
+def send_message_to_chat(message, chat_id):
+    access_token = get_access_token()
+    url = f"https://api.zoom.us/v2/chat/users/me/messages"
     
     headers = {
-        "Authorization": f"Bearer {bot_token}",
+        "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json"
     }
 
     payload = {
         "message": message,
-        "to_jid": "v1jsoyngf4risfasnxugohrq@xmpp.zoom.us",
         "to_channel": chat_id
     }
 
     response = requests.post(url, json=payload, headers=headers)
-    if response.status_code == 200:
-        logging.info("Message sent successfully!")
-    else:
-        logging.error(f"Failed to send message: {response.status_code}, {response.text}")
-
     return response.json()
 
-### ✅ OAuth Flow for Zoom Authentication ###
-@app.route('/authorize')
-def authorize():
-    auth_url = (
-        f"https://zoom.us/oauth/authorize"
-        f"?response_type=code"
-        f"&client_id={ZOOM_CLIENT_ID}"
-        f"&redirect_uri={urllib.parse.quote(ZOOM_REDIRECT_URI)}"
-    )
-    return redirect(auth_url)
-
-@app.route('/oauth/callback')
-def oauth_callback():
-    code = request.args.get('code')
-    token_url = "https://zoom.us/oauth/token"
-    payload = {
-        "grant_type": "authorization_code",
-        "code": code,
-        "redirect_uri": ZOOM_REDIRECT_URI
-    }
-    auth = (ZOOM_CLIENT_ID, ZOOM_CLIENT_SECRET)
-    response = requests.post(token_url, data=payload, auth=auth)
-
-    if response.status_code == 200:
-        access_token = response.json()['access_token']
-        refresh_token = response.json()['refresh_token']
-        logging.info("OAuth Authorization Success")
-        return jsonify({"access_token": access_token})
-    else:
-        logging.error("OAuth token exchange failed")
-        return jsonify({"error": "OAuth token exchange failed"}), 400
-
+# ✅ Run the Flask App
 if __name__ == '__main__':
     port = int(10000)
     app.run(host="0.0.0.0", port=port)
