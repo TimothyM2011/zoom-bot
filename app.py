@@ -1,8 +1,11 @@
 import os
 import requests
 from requests.auth import HTTPBasicAuth
-from flask import request, jsonify
+from flask import Flask, request, jsonify
 
+app = Flask(__name__)
+
+@app.route("/oauth/callback")
 def oauth_callback():
     code = request.args.get("code")
     if not code:
@@ -26,7 +29,7 @@ def oauth_callback():
     response = requests.post(token_url, data=payload, auth=HTTPBasicAuth(client_id, client_secret))
 
     # Print Zoom's full response for debugging
-    print("Zoom Response:", response.status_code, response.text)  
+    print("Zoom Response:", response.status_code, response.text)
 
     if response.status_code == 200:
         tokens = response.json()
@@ -35,3 +38,6 @@ def oauth_callback():
         return jsonify({"message": "OAuth Success", "access_token": access_token, "refresh_token": refresh_token})
     else:
         return jsonify({"error": "OAuth token exchange failed", "details": response.text}), 400
+
+if __name__ == "__main__":
+    app.run(debug=True)
